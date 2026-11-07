@@ -1924,6 +1924,8 @@ function migrate(s) {
   var d = defaultState();
   s.settings = Object.assign({}, d.settings, s.settings || {});
   ['ai', 'teacher', 'countdown', 'thr'].forEach(function (k) { s.settings[k] = Object.assign({}, d.settings[k], s.settings[k] || {}); });
+  // AI 凭据改由本地服务 config.json 管理：旧备份里带来的 Key/地址不进新数据文件
+  if (s.settings.ai) { delete s.settings.ai.key; delete s.settings.ai.base; delete s.settings.ai.model; }
   if (!Array.isArray(s.settings.periods) || !s.settings.periods.length) s.settings.periods = periodsPreset(s.settings.stage);
   s.settings.periods = s.settings.periods.filter(function (p) { return p && p.id; });
   if (!Array.isArray(s.settings.reasons)) s.settings.reasons = deepClone(DEFAULT_REASONS);

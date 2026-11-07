@@ -11,11 +11,19 @@
 const fs = require('fs');
 const path = require('path');
 
-const CURRENT_SCHEMA_VERSION = 1;
+let CURRENT_SCHEMA_VERSION = 1;
 
 /* 迁移链：MIGRATIONS[n] = (state) => newState，把 v n 升到 v n+1。
  * 纯函数：只准改对象，禁止任何 I/O。前端业务字段的补默认值交给 index.html 的 migrate()。 */
 const MIGRATIONS = {};
+
+/* 注册迁移步骤（产品代码启动时或测试注入）：registerMigration(1, fn) 表示 v1 → v2，并自动把当前版本抬到 2 */
+function registerMigration(from, fn) {
+  if (typeof fn !== 'function') throw new Error('迁移函数必须是函数');
+  if (from < 1) throw new Error('迁移起始版本必须 ≥ 1');
+  MIGRATIONS[from] = fn;
+  if (from + 1 > CURRENT_SCHEMA_VERSION) CURRENT_SCHEMA_VERSION = from + 1;
+}
 
 class StoreError extends Error {
   constructor(msg) { super(msg); this.name = 'StoreError'; }
@@ -65,8 +73,14 @@ class Store {
       throw new StoreError(this.lastError);
     }
 
+    const fromVersion = env.schemaVersion;
     env = this.migrateChain(env);
     this.env = env;
+    if (env.schemaVersion !== fromVersion) {
+      // 迁移完成后立即写回，避免下次启动重复迁移（迁移前快照已在 migrateChain 里生成）
+      this.writeAtomic(this.file, JSON.stringify(this.env));
+      console.log('[数据迁移] v' + fromVersion + ' → v' + env.schemaVersion + ' 完成，快照在 ' + this.backupDir);
+    }
     this.dailyBackup();
     return env;
   }
@@ -127,4 +141,4 @@ class Store {
   }
 }
 
-module.exports = { Store, StoreError, CURRENT_SCHEMA_VERSION };
+module.exports = { Store, StoreError, currentVersion: () => CURRENT_SCHEMA_VERSION, registerMigration };
