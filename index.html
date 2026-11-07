@@ -918,7 +918,7 @@ small.dupno { display: inline-block; margin-left: 4px; padding: 0 5px; height: 1
 <script>
 /*
   教师班主任工作台 v2.0 · 个人工作台系列 第 1 期（任课 + 班主任合并）
-  Developed by @赛博老爸
+  本地服务版修改 by txk123 · 原版 Developed by @赛博老爸
   单页应用：由本地服务（server/server.js）托管；数据保存在服务端 data/state.json，不再依赖浏览器存储。
   v2.0 把「任课教师工作台」的多班级、课表、教学进度、作业、单科成绩并了进来，班主任班另有全科成绩、档案、考勤、班级课表和值日表。
 */
@@ -1751,7 +1751,7 @@ var ART = (function () {
       for (k = 0; k < cols; k++) rowS += seatG(L, r + '-' + k, data);
       out += '<g class="row">' + rowS + '</g>';
     }
-    out += txt(L.W - L.WT - 10, L.H - 4.5, 'Developed by @赛博老爸', { 'class': 'wm', 'text-anchor': 'end' });
+    out += txt(L.W - L.WT - 10, L.H - 4.5, 'Developed by @txk', { 'class': 'wm', 'text-anchor': 'end' });
     out += '<g class="fx-layer"></g>';
     out += '</svg>';
     return { svg: out, L: L };
@@ -2975,7 +2975,7 @@ var UI = {
       '<div class="side-foot">' + (S.demo ? '<div class="side-demo"><b>正在查看示例数据</b>3 个班都是虚拟的，其中 3 班是班主任班。看明白了就换成自己的班<button class="btn btn-xs btn-dark" data-act="demo-clear">开始录入我的班级</button></div>' : '') + '<nav class="nav">' + navItem('settings', ICON.gear, '设置') + '</nav>' +
       '<button class="me" data-act="go" data-page="settings" data-sec="profile">' + ART.teacherAvatar(t, 32) +
       '<div><div class="me-name">' + esc(t.name) + '</div><div class="me-sub">' + esc(meSub()) + '</div></div></button>' +
-      '<div class="sign">Developed by @赛博老爸</div></div>' +
+      '<div class="sign">Developed by @txk</div></div>' +
       '</aside>' +
       '<main class="main" id="main"></main>' +
       '<aside class="rail" id="rail"></aside>' +
@@ -7940,7 +7940,7 @@ function showWelcome() {
     '<div id="wBlank" class="' + (Welcome.mode === 'blank' ? '' : 'hide') + '" style="max-width:440px;margin:-12px auto 22px;text-align:left"><div class="field"><label>我教的班级</label><input class="inp" id="wClass" placeholder="多个班用顿号隔开，如：初二（3）班、初二（5）班"><label class="chk" style="margin-top:8px"><input type="checkbox" id="wHr" checked> 第一个班是我当班主任的班</label></div><div class="row2"><div class="field"><label>学段</label><select class="sel" id="wStage"><option>小学</option><option selected>初中</option><option>高中</option></select></div><div class="field"><label>课桌</label><div class="seg light" id="wPer">' + DESK_PER.map(function (d) { return '<button type="button" class="' + (Welcome.per === d[0] ? 'on' : '') + '" data-act="w-per" data-v="' + d[0] + '">' + d[1] + '</button>'; }).join('') + '</div></div></div></div>' +
     '<button class="btn btn-dark w-go" data-act="w-go">开启工作台</button>' +
     '<div class="w-restore">升级了新版本、换了电脑？<label>' + ICON.up + '从备份恢复<input type="file" accept=".json" hidden data-chg="restore"></label>，选之前导出的备份文件，数据就都回来了</div>' +
-    '<div class="muted" style="font-size:12px;margin-top:16px">' + ICON.lock.replace('width="14" height="14"', 'width="12" height="12" style="display:inline;vertical-align:-1px"') + ' 所有数据保存在本机 data 目录，不上传到任何地方</div><div class="sign" style="padding-top:28px">Developed by @赛博老爸</div></div>';
+    '<div class="muted" style="font-size:12px;margin-top:16px">' + ICON.lock.replace('width="14" height="14"', 'width="12" height="12" style="display:inline;vertical-align:-1px"') + ' 所有数据保存在本机 data 目录，不上传到任何地方</div><div class="sign" style="padding-top:28px">Developed by @txk · 基于 @赛博老爸 原版修改</div></div>';
   document.body.appendChild(el);
 }
 UI.act['w-g'] = function (el) {
