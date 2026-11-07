@@ -6877,27 +6877,33 @@ function presetOf(id) { for (var i = 0; i < AI_PRESETS.length; i++) if (AI_PRESE
 
 function tempOf(a) { var t = parseFloat(a.temp); return isNaN(t) ? 0.7 : Math.max(0, Math.min(1.5, t)); }
 var AIC = {
-  ready: function () { var a = S.settings.ai; return !!(a.base && a.model && (a.key || /localhost|127\.0\.0\.1/.test(a.base))); },
-  isClaude: function () { var a = S.settings.ai; return a.provider === 'claude' || /anthropic\.com/.test(a.base); },
-  label: function () { var a = S.settings.ai; return presetOf(a.provider).name.replace(/（.*）/, '') + ' · ' + (a.model || '未填模型'); },
+  cfg: null,   // 服务端 AI 配置缓存 { provider, base, model, keyMasked, configured }
+  loadCfg: function () {
+    return fetch('/api/ai/config', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j.ok) AIC.cfg = j;
+      return j;
+    }).catch(function () { return null; });
+  },
+  saveCfg: function (patch) {
+    return fetch('/api/ai/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j.ok) throw new Error(j.error || '保存失败');
+        AIC.cfg = j;
+        return j;
+      });
+  },
+  ready: function () { return !!(AIC.cfg && AIC.cfg.configured); },
+  label: function () {
+    if (!AIC.cfg) return '未配置 AI 接口';
+    return presetOf(AIC.cfg.provider || 'custom').name.replace(/（.*）/, '') + ' · ' + (AIC.cfg.model || '未填模型');
+  },
   stream: function (messages, onDelta, signal, maxTokens) {
-    var a = S.settings.ai, base = String(a.base || '').replace(/\/+$/, '');
-    var req, url;
-    if (AIC.isClaude()) {
-      var sys = messages.filter(function (m) { return m.role === 'system'; }).map(function (m) { return m.content; }).join('\n\n');
-      url = base + '/messages';
-      req = { method: 'POST', signal: signal, headers: { 'content-type': 'application/json', 'x-api-key': a.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: a.model, max_tokens: maxTokens || 4096, system: sys, stream: true, temperature: Math.min(1, tempOf(a)), messages: messages.filter(function (m) { return m.role !== 'system'; }) }) };
-    } else {
-      url = base + '/chat/completions';
-      var hd = { 'Content-Type': 'application/json' }; if (a.key) hd.Authorization = 'Bearer ' + a.key;
-      var body = { model: a.model, messages: messages, stream: true, temperature: tempOf(a) };
-      if (maxTokens) body.max_tokens = maxTokens;
-      req = { method: 'POST', signal: signal, headers: hd, body: JSON.stringify(body) };
-    }
+    var req = { method: 'POST', signal: signal, headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: messages, maxTokens: maxTokens || 4096, temperature: tempOf(S.settings.ai) }) };
     var full = '';
     function push(t) { if (t) { full += t; onDelta(t, full); } }
-    return fetch(url, req).then(function (res) {
+    return fetch('/api/ai/chat', req).then(function (res) {
       if (!res.ok) return res.text().then(function (t) { throw AIC.httpErr(res.status, t); });
       var ct = res.headers.get('content-type') || '';
       if (ct.indexOf('application/json') >= 0) {
@@ -6929,7 +6935,7 @@ var AIC = {
     }).catch(function (e) {
       if (e && e.isAI) throw e;
       if (e && e.name === 'AbortError') { var ab = new Error('已停止生成'); ab.isAI = true; ab.abort = true; throw ab; }
-      var ne = new Error('连不上 AI 服务。常见原因：① 网络不通或地址填错；② 这家服务不允许网页直接调用（跨域限制）。可以换 DeepSeek、Kimi 等试试，或运行开源包里的 ai-proxy.js 做本地中转。');
+      var ne = new Error('连不上本地服务（127.0.0.1:8788），请确认服务已启动后重试。');
       ne.isAI = true; throw ne;
     });
   },
@@ -7746,16 +7752,17 @@ function renderSetBody() {
       '<div style="display:flex;gap:6px;margin-top:12px"><input class="inp" id="newRs" placeholder="理由，如：解题思路新颖" style="width:220px;height:32px"><input class="inp num" id="newRsD" value="1" style="width:64px;height:32px"><button class="btn btn-light btn-sm" data-act="set-rs-add">添加</button></div>' +
       '<div class="hr"></div><label class="chk"><input type="checkbox" data-chg="set-anim"' + (st.anim ? ' checked' : '') + '> 教室小动画（同学偶尔回头、举手、打瞌睡）</label></div>';
   } else if (SetP.sec === 'ai') {
-    var a = st.ai, pr = presetOf(a.provider);
-    h += '<div class="panel set-sec"><div class="panel-title">AI 接口</div><div class="panel-sub">填一个 API Key 就能在工作台里直接生成。不配置也能用：生成时会给你一段提示词，复制到豆包、DeepSeek 等网页版即可。</div>' +
-      '<div class="field"><label>服务商</label><select class="sel" data-chg="ai-provider">' + AI_PRESETS.map(function (p) { return '<option value="' + p.id + '"' + (a.provider === p.id ? ' selected' : '') + '>' + p.name + '</option>'; }).join('') + '</select>' +
+    var a = st.ai, c = AIC.cfg || {}, pr = presetOf(c.provider || a.provider || 'deepseek');
+    h += '<div class="panel set-sec"><div class="panel-title">AI 接口</div><div class="panel-sub">填一个 API Key 就能在工作台里直接生成。配置保存在本机服务的 config.json 里，页面不会显示已保存的 Key。不配置也能用：生成时会给你一段提示词，复制到豆包、DeepSeek 等网页版即可。</div>' +
+      '<div class="field"><label>服务商</label><select class="sel" data-chg="ai-provider">' + AI_PRESETS.map(function (p) { return '<option value="' + p.id + '"' + ((c.provider || a.provider) === p.id ? ' selected' : '') + '>' + p.name + '</option>'; }).join('') + '</select>' +
       (pr.site ? '<div class="hint">到 ' + esc(pr.site) + ' 注册并创建 API Key' + (pr.hint ? '；' + esc(pr.hint) : '') + '</div>' : (pr.hint ? '<div class="hint">' + esc(pr.hint) + '</div>' : '')) + '</div>' +
-      '<div class="field"><label>API Key</label><div style="display:flex;gap:6px"><input class="inp num" type="password" id="aiKey" value="' + esc(a.key) + '" placeholder="sk-..." data-inp="set" data-path="ai.key" autocomplete="off"><button class="btn btn-light btn-icon" data-act="ai-key-eye" title="显示/隐藏" aria-label="显示或隐藏 Key">' + ICON.eye + '</button></div></div>' +
-      '<div class="row2"><div class="field"><label>接口地址（Base URL）</label>' + sInp('ai.base', a.base, 'https://.../v1') + '</div><div class="field"><label>模型名称</label>' + sInp('ai.model', a.model, '如：deepseek-flash') + '</div></div>' +
+      '<div class="field"><label>API Key</label><div style="display:flex;gap:6px"><input class="inp num" type="password" id="aiKey" value="" placeholder="' + (c.keyMasked ? '已保存（' + esc(c.keyMasked) + '），输入新值即替换' : 'sk-...') + '" data-inp="ai-cfg" data-fld="key" autocomplete="off"><button class="btn btn-light btn-icon" data-act="ai-key-eye" title="显示/隐藏" aria-label="显示或隐藏 Key">' + ICON.eye + '</button></div></div>' +
+      '<div class="row2"><div class="field"><label>接口地址（Base URL）</label><input class="inp" value="' + esc(c.base || '') + '" placeholder="https://.../v1" data-inp="ai-cfg" data-fld="base"></div><div class="field"><label>模型名称</label><input class="inp" value="' + esc(c.model || '') + '" placeholder="如：deepseek-flash" data-inp="ai-cfg" data-fld="model"></div></div>' +
+      '<div class="hint" id="aiCfgStatus">修改后会自动保存到本机 config.json</div>' +
       '<div class="row2"><div class="field"><label>创造性（temperature）</label>' + sInp('ai.temp', a.temp, '0.7', 'number', ' step="0.1" min="0" max="1.5"') + '<div class="hint">写材料建议 0.6–0.8；出题、分析可以调低到 0.3–0.5</div></div>' +
       '<div class="field"><label>隐私</label><label class="chk" style="height:38px"><input type="checkbox" data-chg="ai-mask"' + (a.mask ? ' checked' : '') + '>发送前隐去学生姓名</label><div class="hint">姓名替换成【学生07】这样的编号，结果回来后自动换回</div></div></div>' +
       '<div style="display:flex;gap:10px;align-items:center"><button class="btn btn-dark" data-act="ai-test">测试连接</button><span id="aiTestRes" class="muted" style="font-size:13px"></span></div></div>' +
-      '<div class="panel set-sec"><div class="panel-title">连不上？</div><div style="font-size:13px;line-height:1.85;color:var(--ink2)">网页直接调用 AI 时，有些服务商会拦截（跨域限制）。DeepSeek、Kimi、OpenAI、Claude 一般可以直接用；如果提示「连不上」，可以：<br>① 换一家服务商试试；② 用开源包里的 <span class="kbd">ai-proxy.js</span>：电脑装好 Node.js 后运行 <span class="kbd">node ai-proxy.js</span>，再把接口地址改成 <span class="kbd">http://127.0.0.1:8787/</span> 加原地址，例如 <span class="kbd">http://127.0.0.1:8787/https://api.deepseek.com</span>。<br>API Key 只保存在这台电脑的浏览器里，不会上传到任何地方。</div></div>';
+      '<div class="panel set-sec"><div class="panel-title">连不上？</div><div style="font-size:13px;line-height:1.85;color:var(--ink2)">AI 请求由本地服务转发，不受浏览器跨域限制，DeepSeek、智谱、Kimi、通义、豆包等都可以直接用。连不上时按顺序检查：<br>① 接口地址、模型名称是否填对（模型名去服务商后台复制最新的）；<br>② 账户里有没有余额；<br>③ 看生成时显示的具体错误。<br>API Key 保存在本机服务的 config.json 文件里，页面永远看不到它，也不会上传到任何地方。</div></div>';
   } else if (SetP.sec === 'data') {
     var size = 0; try { size = JSON.stringify(S || {}).length; } catch (e) { }
     var days = st.lastBackup ? Math.floor((Date.now() - st.lastBackup) / 86400000) : null;
@@ -7844,14 +7851,29 @@ UI.act['set-rs-del'] = function (el) { S.settings.reasons.splice(+el.getAttribut
 UI.act['set-rs-add'] = function () { var t = $('#newRs').value.trim(), d = parseInt($('#newRsD').value, 10) || 1; if (!t) { $('#newRs').focus(); return; } S.settings.reasons.push({ t: t, d: d }); save(); renderSetBody(); };
 /* AI */
 UI.chg['ai-provider'] = function (el) {
-  var p = presetOf(el.value), a = S.settings.ai;
-  a.provider = p.id; if (p.id !== 'custom') { a.base = p.base; a.model = p.model; }
-  save(); renderSetBody();
+  var p = presetOf(el.value);
+  var patch = { provider: p.id };
+  if (p.id !== 'custom' && p.base) { patch.base = p.base; patch.model = p.model; }
+  var s0 = $('#aiCfgStatus'); if (s0) s0.textContent = '保存中…';
+  AIC.saveCfg(patch).then(function () { renderSetBody(); var s1 = $('#aiCfgStatus'); if (s1) s1.textContent = '已保存'; }).catch(function (e) { var s1 = $('#aiCfgStatus'); if (s1) s1.textContent = e.message; });
+};
+UI.inp['ai-cfg'] = function (el) {
+  var fld = el.getAttribute('data-fld'), v = el.value.trim();
+  clearTimeout(AIC._cfgTimer);
+  AIC._cfgTimer = setTimeout(function () {
+    var patch = {}; patch[fld] = v;
+    var s0 = $('#aiCfgStatus'); if (s0) s0.textContent = '保存中…';
+    AIC.saveCfg(patch).then(function () {
+      var s1 = $('#aiCfgStatus');
+      if (s1) s1.textContent = AIC.cfg.configured ? '已保存 · 配置已就绪' : '已保存 · 还差：接口地址、模型名称' + (/localhost|127\.0\.0\.1/.test(AIC.cfg.base || '') ? '' : '、API Key');
+      if (fld === 'key' && el.isConnected) { el.value = ''; el.placeholder = '已保存（' + (AIC.cfg.keyMasked || '') + '），输入新值即替换'; }
+    }).catch(function (e) { var s1 = $('#aiCfgStatus'); if (s1) s1.textContent = e.message; });
+  }, 700);
 };
 UI.act['ai-key-eye'] = function () { var k = $('#aiKey'); k.type = k.type === 'password' ? 'text' : 'password'; };
 UI.act['ai-test'] = function () {
   var r = $('#aiTestRes');
-  if (!AIC.ready()) { r.innerHTML = '<span class="dn">请先填写接口地址、模型名称和 API Key</span>'; return; }
+  if (!AIC.ready()) { r.innerHTML = '<span class="dn">请先填写接口地址、模型名称和 API Key（填写后自动保存生效）</span>'; return; }
   r.textContent = '正在连接…';
   var t0 = Date.now();
   AIC.stream([{ role: 'user', content: '请只回复四个字：连接成功' }], function () { }, null, 20).then(function (txt) {
@@ -7968,6 +7990,7 @@ async function boot() {
   var raw = null;
   try { raw = await ServerStore.fetchState(); }
   catch (e) { showServerDown(e.message); return; }
+  await AIC.loadCfg();
   S = raw ? migrate(raw) : null;
   if (!S || !S.settings.onboarded) { S = defaultState(); showWelcome(); return; }
   UI.shell();

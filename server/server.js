@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const { Store, StoreError } = require('./store');
+const ai = require('./ai');
 
 const ROOT = path.join(__dirname, '..');
 const BASE_PORT = Number(process.env.PORT) || 8788;
@@ -88,6 +89,9 @@ function createApp(dataDir) {
           return send(res, 500, { ok: false, error: e.message });
         }
       }
+      if (url === '/api/ai/config' && req.method === 'GET') return ai.getConfig(res, send);
+      if (url === '/api/ai/config' && req.method === 'PUT') { const raw = await readBody(req); return ai.putConfig(req, res, raw, send); }
+      if (url === '/api/ai/chat' && req.method === 'POST') { const raw = await readBody(req); return ai.chat(req, res, raw, send); }
       if (url.startsWith('/api/')) return send(res, 404, { ok: false, error: 'unknown api' });
       return serveStatic(req, res);
     } catch (e) {
@@ -116,23 +120,28 @@ function openBrowser(url) {
 if (require.main === module) {
   const dataDir = process.env.DATA_DIR || path.join(ROOT, 'data');
   const app = createApp(dataDir);
-  let port = BASE_PORT;
-  const tryListen = () => {
-    app.server.once('error', e => {
-      if (e.code === 'EADDRINUSE' && port < BASE_PORT + 10) { port++; console.log('端口 ' + (port - 1) + ' 被占用，改用 ' + port); tryListen(); }
-      else { console.error('启动失败：' + e.message); process.exit(1); }
-    });
-    app.server.listen(port, '127.0.0.1', () => {
-      const url = 'http://127.0.0.1:' + port + '/';
-      console.log('教师班主任工作台（本地服务版）已启动 → ' + url);
-      console.log('数据目录：' + dataDir);
-      if (app.bootError()) console.error('[数据警告] ' + app.bootError());
-      if (app.store.readOnly) console.error('[只读模式] ' + app.store.lastError);
-      openBrowser(url);
-      console.log('按 Ctrl + C 关闭（数据不受影响）');
-    });
-  };
-  tryListen();
+  let currentPort = BASE_PORT;
+
+  app.server.on('listening', () => {
+    const url = 'http://127.0.0.1:' + currentPort + '/';
+    console.log('教师班主任工作台（本地服务版）已启动 → ' + url);
+    console.log('数据目录：' + dataDir);
+    if (app.bootError()) console.error('[数据警告] ' + app.bootError());
+    if (app.store.readOnly) console.error('[只读模式] ' + app.store.lastError);
+    openBrowser(url);
+    console.log('按 Ctrl + C 关闭（数据不受影响）');
+  });
+  app.server.on('error', e => {
+    if (e.code === 'EADDRINUSE' && currentPort < BASE_PORT + 10) {
+      currentPort++;
+      console.log('端口 ' + (currentPort - 1) + ' 被占用，改用 ' + currentPort);
+      app.server.listen(currentPort, '127.0.0.1');
+    } else {
+      console.error('启动失败：' + e.message);
+      process.exit(1);
+    }
+  });
+  app.server.listen(currentPort, '127.0.0.1');
 }
 
 module.exports = { createApp, BASE_PORT };
