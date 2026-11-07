@@ -74,7 +74,7 @@ function createApp(dataDir) {
         if (!store.env) return send(res, 500, { ok: false, error: bootError || '数据未加载' });
         return send(res, 200, { ok: true, data: store.env });
       }
-      if (url === '/api/state' && req.method === 'PUT') {
+      if (url === '/api/state' && (req.method === 'PUT' || req.method === 'POST')) {  // POST：关页 sendBeacon 兜底，语义同 PUT
         const raw = await readBody(req);
         let body; try { body = JSON.parse(raw); } catch (e) { return send(res, 400, { ok: false, error: '请求体不是合法 JSON' }); }
         if (!body || typeof body !== 'object' || !('state' in body) || !('rev' in body)) {
@@ -99,9 +99,17 @@ function createApp(dataDir) {
 }
 
 function openBrowser(url) {
+  if (process.env.NO_OPEN) return;
   const cmd = process.platform === 'win32' ? 'cmd /c start "" "' + url + '"'
     : process.platform === 'darwin' ? 'open "' + url + '"' : 'xdg-open "' + url + '"';
-  exec(cmd, () => { });
+  // 自动开浏览器失败（受限环境/无默认浏览器）不影响服务，提示手动访问即可
+  try {
+    exec(cmd, function (e) {
+      if (e) console.log('（未能自动打开浏览器，请手动访问 ' + url + '）');
+    });
+  } catch (e) {
+    console.log('（未能自动打开浏览器，请手动访问 ' + url + '）');
+  }
 }
 
 /* 直接运行：选端口 → 启动 → 打开浏览器 */

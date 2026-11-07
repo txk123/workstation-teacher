@@ -919,7 +919,7 @@ small.dupno { display: inline-block; margin-left: 4px; padding: 0 5px; height: 1
 /*
   教师班主任工作台 v2.0 · 个人工作台系列 第 1 期（任课 + 班主任合并）
   Developed by @赛博老爸
-  单文件、无依赖：双击即可在浏览器打开；数据保存在本机浏览器 localStorage。
+  单页应用：由本地服务（server/server.js）托管；数据保存在服务端 data/state.json，不再依赖浏览器存储。
   v2.0 把「任课教师工作台」的多班级、课表、教学进度、作业、单科成绩并了进来，班主任班另有全科成绩、档案、考勤、班级课表和值日表。
 */
 /* =========================================================
@@ -1767,9 +1767,6 @@ var ART = (function () {
    CORE · 工具函数、存储、数据模型（多班级）、示例数据、查询与统计
    ========================================================= */
 var VERSION = '2.0.0';
-var STORE_KEY = 'bzr-workbench-v2';
-/* 旧版本的数据：v1.1 班主任工作台（单个班）、任课教师工作台。第一次打开 v2.0 时自动接过来，旧数据原样保留 */
-var LEGACY_KEYS = ['bzr-workbench-v1', 'rk-workbench-v1'];
 /* ---------- 工具 ---------- */
 function esc(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -1793,17 +1790,68 @@ function fmtNum(v, d) { if (v === null || v === undefined || isNaN(v)) return '�
 function pct(v) { if (v === null || v === undefined || isNaN(v)) return '—'; return Math.round(v * 1000) / 10 + '%'; }
 function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
 
-/* ---------- 存储（禁用 localStorage 时自动降级为内存） ---------- */
-var Store = (function () {
-  var mem = {}, ok = true;
-  try { localStorage.setItem('__bzr_t', '1'); localStorage.removeItem('__bzr_t'); } catch (e) { ok = false; }
-  return {
-    ok: function () { return ok; },
-    get: function (k) { try { return ok ? localStorage.getItem(k) : (mem[k] || null); } catch (e) { return mem[k] || null; } },
-    set: function (k, v) { try { if (ok) localStorage.setItem(k, v); else mem[k] = v; return true; } catch (e) { mem[k] = v; return false; } },
-    del: function (k) { try { if (ok) localStorage.removeItem(k); } catch (e) { } delete mem[k]; }
-  };
-})();
+/* ---------- 存储：本地服务（数据存服务端 data/state.json，不再放浏览器） ---------- */
+var ServerStore = {
+  rev: null,          // 服务端数据版本号（乐观锁）
+  online: false,      // 本地服务是否可达
+  readOnly: false,    // 服务端只读（数据文件比程序新）
+  _dirty: false, _inflight: false, _retryTimer: null, _failToasted: false,
+
+  /* 启动时拉取数据：resolve(state 对象或 null)，reject(Error 带人话) */
+  fetchState: function () {
+    return fetch('/api/state', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.ok) throw new Error(j.error || '本地服务返回错误');
+      ServerStore.online = true;
+      ServerStore.rev = j.data.rev;
+      ServerStore.readOnly = !!j.data.readOnly;
+      return j.data.state;
+    }, function () {
+      ServerStore.online = false;
+      throw new Error('无法连接本地服务（127.0.0.1:8788）。请先启动服务：双击 start.bat（或运行 node server/server.js），看到「已启动」后刷新页面。');
+    });
+  },
+
+  /* 落盘：250ms 防抖由 save() 控制；失败自动重试；409 冲突提示刷新 */
+  put: function () {
+    if (!ServerStore.online || ServerStore.readOnly) return;
+    ServerStore._dirty = true;
+    if (ServerStore._inflight) return;
+    ServerStore._inflight = true;
+    function attempt() {
+      var payload;
+      try { payload = JSON.stringify({ state: S, rev: ServerStore.rev }); }
+      catch (e) { ServerStore._inflight = false; return; }
+      fetch('/api/state', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: payload })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+        .then(function (res) {
+          ServerStore._inflight = false;
+          if (res.ok && res.j.ok) {
+            ServerStore.rev = res.j.rev;
+            var more = ServerStore._dirty; ServerStore._dirty = false;
+            ServerStore._failToasted = false;
+            if (more) ServerStore.put();               // 在途期间又有改动 → 补一轮
+          } else if (res.j.conflict) {
+            ServerStore._dirty = false;
+            if (window.UI) UI.toast('数据已被另一个窗口修改，请刷新页面后继续', 6000);
+          } else {
+            throw new Error(res.j.error || ('HTTP ' + res.status));
+          }
+        })
+        .catch(function (e) {
+          ServerStore._inflight = false;
+          if (!ServerStore._failToasted && window.UI) { ServerStore._failToasted = true; UI.toast('连不上本地服务，恢复后改动会自动保存', 5000); }
+          if (!ServerStore._retryTimer) ServerStore._retryTimer = setTimeout(function () { ServerStore._retryTimer = null; if (ServerStore._dirty) ServerStore.put(); }, 3000);
+        });
+    }
+    attempt();
+  },
+
+  /* 关页兜底：防抖没来得及落盘时用 sendBeacon 补一刀 */
+  beacon: function () {
+    if (!ServerStore._dirty || !ServerStore.online || ServerStore.readOnly || ServerStore.rev === null) return;
+    try { navigator.sendBeacon('/api/state', new Blob([JSON.stringify({ state: S, rev: ServerStore.rev })], { type: 'application/json' })); } catch (e) { }
+  }
+};
 
 
 var S = null; // 全局状态
@@ -1814,26 +1862,7 @@ function save(now) {
   if (!S) return;
   reindex();
   clearTimeout(saveTimer);
-  var run = function () {
-    var ok = Store.set(STORE_KEY, JSON.stringify(S));
-    if (!ok && window.UI) UI.toast('存储空间不足，请到设置里导出备份');
-  };
-  if (now) run(); else saveTimer = setTimeout(run, 250);
-}
-function load() {
-  var raw = Store.get(STORE_KEY);
-  if (!raw) {
-    // 第一次打开 v2.0：把旧版班主任工作台（v1.1）和任课教师工作台的数据接过来；两个都用过就合并
-    var got = [];
-    LEGACY_KEYS.forEach(function (k) { var r0 = Store.get(k); if (r0) { try { var o = JSON.parse(r0); if (o && o.settings && o.settings.onboarded) got.push(o); } catch (e) { } } });
-    if (!got.length) return null;
-    try {
-      var vs = got.filter(looksV11)[0], rk = got.filter(function (o) { return !looksV11(o); })[0];
-      if (vs && rk) return mergeLegacy(migrate(rk), migrate(vs));
-      var d = migrate(got[0]); d.from = d.from || 'rk'; return d;
-    } catch (e2) { return null; }
-  }
-  try { return migrate(JSON.parse(raw)); } catch (e) { return null; }
+  if (now) ServerStore.put(); else saveTimer = setTimeout(ServerStore.put, 250);
 }
 
 /* ---------- 常量 ---------- */
@@ -4240,7 +4269,7 @@ Cls.renderRail = function (el) {
   h += '<div class="rail-sec"><div class="rail-k">待办</div>' + S.todos.map(function (t) {
     return '<label class="todo' + (t.done ? ' done' : '') + '"><input type="checkbox" data-chg="todo-done" data-id="' + t.id + '"' + (t.done ? ' checked' : '') + '><span>' + esc(t.text) + '</span><button class="x" data-act="todo-del" data-id="' + t.id + '" aria-label="删除">×</button></label>';
   }).join('') + '<div class="todo-add"><input class="inp" id="todoNew" placeholder="添加一件要做的事" data-key="todo-add"><button class="btn btn-sm btn-dark btn-icon" data-act="todo-add" aria-label="添加" style="width:32px;height:32px">' + ICON.plus + '</button></div></div>';
-  h += '<div class="privacy">' + ICON.lock + '<span>数据只保存在这台电脑的浏览器里</span><button data-act="backup">备份</button></div>';
+  h += '<div class="privacy">' + ICON.lock + '<span>数据保存在本机 data 目录，不上传到任何地方</span><button data-act="backup">备份</button></div>';
   el.innerHTML = h;
 };
 UI.chg['todo-done'] = function (el) { var t = S.todos.filter(function (x) { return x.id === el.getAttribute('data-id'); })[0]; if (t) { t.done = el.checked; save(); Cls.renderRail(); } };
@@ -7728,18 +7757,18 @@ function renderSetBody() {
       '<div style="display:flex;gap:10px;align-items:center"><button class="btn btn-dark" data-act="ai-test">测试连接</button><span id="aiTestRes" class="muted" style="font-size:13px"></span></div></div>' +
       '<div class="panel set-sec"><div class="panel-title">连不上？</div><div style="font-size:13px;line-height:1.85;color:var(--ink2)">网页直接调用 AI 时，有些服务商会拦截（跨域限制）。DeepSeek、Kimi、OpenAI、Claude 一般可以直接用；如果提示「连不上」，可以：<br>① 换一家服务商试试；② 用开源包里的 <span class="kbd">ai-proxy.js</span>：电脑装好 Node.js 后运行 <span class="kbd">node ai-proxy.js</span>，再把接口地址改成 <span class="kbd">http://127.0.0.1:8787/</span> 加原地址，例如 <span class="kbd">http://127.0.0.1:8787/https://api.deepseek.com</span>。<br>API Key 只保存在这台电脑的浏览器里，不会上传到任何地方。</div></div>';
   } else if (SetP.sec === 'data') {
-    var size = 0; try { size = (Store.get(STORE_KEY) || '').length; } catch (e) { }
+    var size = 0; try { size = JSON.stringify(S || {}).length; } catch (e) { }
     var days = st.lastBackup ? Math.floor((Date.now() - st.lastBackup) / 86400000) : null;
     h += '<div class="upgrade-tip"><div class="ut-ico">' + ICON.up + '</div><div class="ut-body"><b>升级新版本前，请先保存数据</b>' +
       '<ol><li><b>升级前：</b>点下面的「导出备份」，把备份文件（.json）存好，比如存到 U 盘或网盘。</li>' +
       '<li><b>升级后：</b>打开新版本，到「设置 → 数据与备份」点「从备份恢复」，选这个备份文件，数据就都回来了，接着用就行。新版本第一次打开时，欢迎页上也有「从备份恢复」。</li></ol>' +
-      '<small>在同一个浏览器里用新文件替换旧文件，一般会自动沿用原来的数据；换了电脑、换了浏览器，或者打开后数据没出现，用备份恢复即可。旧版本导出的备份，新版本都能导入。</small>' +
+      '<small>程序升级不影响数据：数据文件在 <b>data</b> 目录里，新版本打开后会自动完成格式升级（升级前也会自动留一份快照）。换了电脑，把整个文件夹拷过去即可；要分享单份数据，用「导出备份 / 从备份恢复」。</small>' +
       '<div class="ut-foot">当前版本 v' + VERSION + ' · ' + (st.lastBackup ? '上次备份：' + fmtTime(st.lastBackup) + (days >= 7 ? '，<span class="dn">已经 ' + days + ' 天没备份了</span>' : '') : '<span class="dn">还没有备份过</span>') + '<button class="btn btn-dark btn-sm" data-act="backup">' + ICON.down + '现在导出备份</button></div></div></div>' +
-      '<div class="panel set-sec"><div class="panel-title">数据与备份</div><div class="panel-sub">所有数据只保存在这台电脑的浏览器里，不会上传。清理浏览器数据、换电脑、升级新版本前，请先导出备份。</div>' +
+      '<div class="panel set-sec"><div class="panel-title">数据与备份</div><div class="panel-sub">所有数据保存在本机服务的 data 目录里，不会上传。升级新版本、换电脑前，请先导出备份。</div>' +
       '<div class="info-grid" style="margin-bottom:16px"><div class="k">当前数据</div><div>' + S.classes.length + ' 个班 · ' + allStudents().length + ' 名学生 · ' + Object.keys(S.tt).length + ' 格课表 · ' + S.exams.length + ' 场考试 · ' + S.hw.length + ' 次作业 · ' + S.points.length + ' 条点评' + (hrCls() ? ' · ' + Object.keys(S.attendance).length + ' 天考勤 · ' + S.records.length + ' 条成长记录' : '') + ' · ' + S.chats.length + ' 个 AI 对话</div>' +
       '<div class="k">占用空间</div><div class="num">' + (size / 1024).toFixed(1) + ' KB</div>' +
       '<div class="k">上次备份</div><div>' + (st.lastBackup ? fmtTime(st.lastBackup) : '<span class="dn">还没有备份过</span>') + '</div>' +
-      '<div class="k">存储状态</div><div>' + (Store.ok() ? '正常' : '<span class="dn">浏览器禁止了本地存储，关闭页面后数据会丢失，请及时导出备份</span>') + '</div></div>' +
+      '<div class="k">存储状态</div><div>' + (ServerStore.readOnly ? '<span class="dn">只读模式：数据文件版本比程序新，请升级程序后再使用</span>' : ServerStore.online ? '本地服务正常 · 数据保存在 data 目录' : '<span class="dn">本地服务未连接，改动暂未保存，请重启服务</span>') + '</div></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-dark" data-act="backup">' + ICON.down + '导出备份</button><label class="btn btn-light" style="cursor:pointer">' + ICON.up + '从备份恢复<input type="file" accept=".json" hidden data-chg="restore"></label></div></div>' +
       '<div class="panel set-sec"><div class="panel-title">重新开始</div><div class="panel-sub">以下操作会覆盖当前数据，建议先导出备份</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-light" data-act="load-demo">载入示例数据</button><button class="btn btn-light" data-act="wipe" style="color:var(--red)">' + ICON.trash + '清空全部数据</button></div></div>';
   } else if (SetP.sec === 'about') {
@@ -7885,7 +7914,7 @@ function showWelcome() {
     '<div id="wBlank" class="' + (Welcome.mode === 'blank' ? '' : 'hide') + '" style="max-width:440px;margin:-12px auto 22px;text-align:left"><div class="field"><label>我教的班级</label><input class="inp" id="wClass" placeholder="多个班用顿号隔开，如：初二（3）班、初二（5）班"><label class="chk" style="margin-top:8px"><input type="checkbox" id="wHr" checked> 第一个班是我当班主任的班</label></div><div class="row2"><div class="field"><label>学段</label><select class="sel" id="wStage"><option>小学</option><option selected>初中</option><option>高中</option></select></div><div class="field"><label>课桌</label><div class="seg light" id="wPer">' + DESK_PER.map(function (d) { return '<button type="button" class="' + (Welcome.per === d[0] ? 'on' : '') + '" data-act="w-per" data-v="' + d[0] + '">' + d[1] + '</button>'; }).join('') + '</div></div></div></div>' +
     '<button class="btn btn-dark w-go" data-act="w-go">开启工作台</button>' +
     '<div class="w-restore">升级了新版本、换了电脑？<label>' + ICON.up + '从备份恢复<input type="file" accept=".json" hidden data-chg="restore"></label>，选之前导出的备份文件，数据就都回来了</div>' +
-    '<div class="muted" style="font-size:12px;margin-top:16px">' + ICON.lock.replace('width="14" height="14"', 'width="12" height="12" style="display:inline;vertical-align:-1px"') + ' 所有数据只保存在这台电脑的浏览器里</div><div class="sign" style="padding-top:28px">Developed by @赛博老爸</div></div>';
+    '<div class="muted" style="font-size:12px;margin-top:16px">' + ICON.lock.replace('width="14" height="14"', 'width="12" height="12" style="display:inline;vertical-align:-1px"') + ' 所有数据保存在本机 data 目录，不上传到任何地方</div><div class="sign" style="padding-top:28px">Developed by @赛博老爸</div></div>';
   document.body.appendChild(el);
 }
 UI.act['w-g'] = function (el) {
@@ -7922,23 +7951,39 @@ UI.act['w-go'] = function () {
   UI.shell(); UI.go('class');
 };
 
-function boot() {
-  S = load();
+function showServerDown(msg) {
+  var d = document.createElement('div');
+  d.id = 'serverDown';
+  d.style.cssText = 'position:fixed;inset:0;z-index:9999;background:#f5f5f4;display:flex;align-items:center;justify-content:center;padding:24px';
+  d.innerHTML = '<div style="max-width:520px;background:#fff;border:1px solid #ececea;border-radius:18px;padding:32px;font-family:system-ui,\'Microsoft YaHei\',sans-serif;color:#171717;line-height:1.9">' +
+    '<div style="font-size:20px;font-weight:700;margin-bottom:10px">本地服务未连接</div>' +
+    '<div style="font-size:13.5px;color:#5c5c5a">数据保存在本机服务的 <b>data</b> 目录里，需要先启动服务再使用：</div>' +
+    '<ol style="font-size:13.5px;color:#5c5c5a;padding-left:20px;margin:10px 0"><li>在本文件夹双击 <b>start.bat</b>（或运行 <b>node server/server.js</b>）</li><li>看到「已启动」后，点下面的按钮重新连接</li></ol>' +
+    '<div style="font-size:12px;color:#9a9a97;margin-bottom:16px;word-break:break-all">服务返回：' + esc(String(msg || '')).slice(0, 220) + '</div>' +
+    '<button onclick="location.reload()" style="border:0;background:#171717;color:#fff;border-radius:10px;padding:10px 22px;font-size:14px;cursor:pointer">重新连接</button></div>';
+  document.body.appendChild(d);
+}
+
+async function boot() {
+  var raw = null;
+  try { raw = await ServerStore.fetchState(); }
+  catch (e) { showServerDown(e.message); return; }
+  S = raw ? migrate(raw) : null;
   if (!S || !S.settings.onboarded) { S = defaultState(); showWelcome(); return; }
   UI.shell();
   var h = (location.hash || '').replace('#/', '');
   UI.go(UI.pages[h] ? h : 'class');
-  if (S.from) {   // 刚从旧版接过来的数据：提示一次，并存成新版
+  if (S.from) {   // 刚从旧备份接过来的数据：提示一次，并存成新版
     var msg = { 'v1.1': '已把班主任工作台 v1.1 的数据升级到新版：原来的班设为班主任班，学生、座位、成绩、考勤都在', 'rk': '已接上任课教师工作台的数据。在班级栏点「班主任」，设置你当班主任的班', 'merge': '已把班主任工作台 v1.1 和任课教师工作台的数据合并到一起：' + (hrCls() ? hrCls().name : '') + ' 设为班主任班', 'demo': '已载入新版示例数据' }[S.from];
     delete S.from; save(true);
     if (msg) setTimeout(function () { UI.toast(msg, 6000); }, 900);
   }
-  if (!Store.ok()) setTimeout(function () { UI.toast('浏览器禁止了本地存储，关闭页面前请到设置里导出备份'); }, 800);
 }
 window.addEventListener('hashchange', function () {
   var h = (location.hash || '').replace('#/', '');
   if (S && S.settings.onboarded && UI.pages[h] && h !== UI.page) UI.go(h);
 });
+window.addEventListener('pagehide', function () { ServerStore.beacon(); });
 boot();
 
 </script>
