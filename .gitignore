@@ -1,0 +1,12 @@
+# 运行时数据与本地配置
+data/
+server/config.json
+
+# 依赖与构建产物
+node_modules/
+dist/
+*.exe
+
+# 系统文件
+Thumbs.db
+.DS_Store
