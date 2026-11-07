@@ -1,14 +1,19 @@
 @echo off
-rem æ•™å¸ˆç­ä¸»ä»»å·¥ä½œå°ï¼ˆæœ¬åœ°æœåŠ¡ç‰ˆï¼‰Â· ä¸€é”®å¯åŠ¨
-cd /d %~dp0
+title ½ÌÊ¦°àÖ÷ÈÎ¹¤×÷Ì¨£¨±¾µØ·şÎñ°æ£©
+cd /d "%~dp0"
+
 where node >nul 2>nul
-if errorlevel 1 (
-  echo æœªæ£€æµ‹åˆ° Node.jsï¼Œè¯·å…ˆå®‰è£…ï¼šhttps://nodejs.org
-  pause
-  exit /b 1
-)
-echo æ­£åœ¨å¯åŠ¨æ•™å¸ˆç­ä¸»ä»»å·¥ä½œå°...
+if errorlevel 1 goto no_node
+
+set "DATA_DIR=%~dp0data"
+echo ÕıÔÚÆô¶¯½ÌÊ¦°àÖ÷ÈÎ¹¤×÷Ì¨£¨±¾µØ·şÎñ°æ£©...
 node server\server.js
 echo.
-echo æœåŠ¡å·²é€€å‡ºã€‚
+echo ·şÎñÒÑÍË³ö£¨Êı¾İ±£´æÔÚ data Ä¿Â¼£¬²»ÊÜÓ°Ïì£©¡£
 pause
+exit /b 0
+
+:no_node
+echo Î´¼ì²âµ½ Node.js£¬ÇëÏÈ°²×°£ºhttps://nodejs.org
+pause
+exit /b 1

@@ -1,0 +1,7 @@
+# 行尾策略：bat 必须 CRLF 原样存储（cmd 解析要求，转 LF 会闪退）；sh 必须 LF
+*.bat -text
+*.sh text eol=lf
+# 图片/二进制不做转换
+*.png -text
+*.exe -text
+*.zip -text
