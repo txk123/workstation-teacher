@@ -7784,9 +7784,11 @@ function renderSetBody() {
     h += '<div class="panel set-sec"><div style="display:flex;gap:14px;align-items:center">' + brandMark().replace('class="brand-mark"', 'class="brand-mark" style="width:52px;height:52px"') + '<div><div style="font-size:18px;font-weight:700">教师班主任工作台</div><div class="muted" style="font-size:13px">个人工作台系列 · 第 1 期 · v' + VERSION + '</div></div></div>' +
       '<div style="font-size:13.5px;line-height:1.9;color:var(--ink2);margin-top:14px">给当班主任、同时也教课的老师：自己教的每个班有课表与调课、教学进度、作业登记、单科成绩和平行班对比；当班主任的那个班还能管所有科目的成绩、学生档案、考勤、班级课表和值日表。外加可接入任意大模型的 AI 助手。所有数据都留在你自己的电脑上。<br>开源版只做 PC 端；手机端和更多职业版本会陆续推出。</div>' +
       '<div style="font-size:13px;line-height:1.8;color:var(--ink2);margin-top:12px;padding:12px 14px;background:var(--fill);border-radius:12px"><b style="color:var(--ink)">开源协议</b><br>个人可以免费使用、修改和二次开发，分享时请保留作者署名和协议；禁止任何形式的商业使用。完整条款见随软件附带的 LICENSE 文件。</div>' +
-      '<div class="dev-info"><b>开发者</b><div class="info-grid"><div class="k">全网渠道</div><div>@赛博老爸</div>' +
+      '<div class="dev-info"><b>原作者 · 开源版</b><div class="info-grid"><div class="k">全网渠道</div><div>@赛博老爸</div>' +
       '<div class="k">商用及合作开发</div><div class="dev-mail"><a href="mailto:' + DEV_MAIL + '">' + DEV_MAIL + '</a><button class="btn btn-xs btn-light" data-act="copy-txt" data-t="' + DEV_MAIL + '">复制</button></div></div></div>' +
-      '<div class="sign" style="padding:14px 0 0;font-size:11px">Developed by @赛博老爸</div></div>';
+      '<div class="dev-info"><b>本地服务版 · 修改说明</b><div class="info-grid"><div class="k">修改者</div><div>txk123（GitHub）</div>' +
+      '<div class="k">主要改动</div><div>数据存本机 data 目录（不再依赖浏览器存储）、AI 请求由本地服务转发（不受浏览器跨域限制）、数据文件带版本迁移机制</div></div></div>' +
+      '<div class="sign" style="padding:14px 0 0;font-size:11px">基于 @赛博老爸 教师班主任工作台 v2.0.0 修改 · 原版 Developed by @赛博老爸</div></div>';
   }
   el.innerHTML = h;
 }
