@@ -19,7 +19,11 @@ Copy-Item (Join-Path $root 'server\ai.js') "$pkg\app\server\"
 Copy-Item (Join-Path $root 'server\config.example.json') "$pkg\app\server\"
 
 # 启动脚本与使用说明从 scripts\pkg-assets 复制（它们不在源码树里重复维护）
-Copy-Item (Join-Path $PSScriptRoot 'pkg-assets\启动工作台.bat') "$pkg\启动工作台.bat"
+# .bat 必须 GBK(936) 编码 + CRLF 换行：cmd 按 OEM 码页解析 bat，UTF-8/LF 会导致解析错乱闪退
+$batSrc = Join-Path $PSScriptRoot 'pkg-assets\启动工作台.bat'
+$batText = [IO.File]::ReadAllText($batSrc, [Text.UTF8Encoding]::new($false))
+$batText = $batText -replace "`r?`n", "`r`n"
+[IO.File]::WriteAllText((Join-Path $pkg '启动工作台.bat'), $batText, [Text.Encoding]::GetEncoding(936))
 Copy-Item (Join-Path $PSScriptRoot 'pkg-assets\使用说明.txt') "$pkg\使用说明.txt"
 
 $zip = Join-Path $root 'dist\教师班主任工作台-本地服务版.zip'
