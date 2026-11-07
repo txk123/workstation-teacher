@@ -10,3 +10,4 @@ dist/
 # 系统文件
 Thumbs.db
 .DS_Store
+dist/
