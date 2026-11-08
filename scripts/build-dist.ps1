@@ -26,6 +26,11 @@ $batText = $batText -replace "`r?`n", "`r`n"
 [IO.File]::WriteAllText((Join-Path $pkg '启动工作台.bat'), $batText, [Text.Encoding]::GetEncoding(936))
 Copy-Item (Join-Path $PSScriptRoot 'pkg-assets\使用说明.txt') "$pkg\使用说明.txt"
 
+# 图文操作说明与截图
+New-Item -ItemType Directory -Path "$pkg\docs" -Force | Out-Null
+Copy-Item (Join-Path $root 'docs\操作说明.md') "$pkg\docs\操作说明.md"
+Copy-Item (Join-Path $root 'docs\images') "$pkg\docs\images" -Recurse -Force
+
 $zip = Join-Path $root 'dist\教师班主任工作台-本地服务版.zip'
 if (Test-Path $zip) { Remove-Item $zip -Force }
 Compress-Archive -Path $pkg -DestinationPath $zip
